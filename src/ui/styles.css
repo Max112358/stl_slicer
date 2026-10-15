@@ -1,0 +1,127 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  overflow: hidden;
+}
+
+#app {
+  display: flex;
+  height: 100%;
+}
+
+#sidebar {
+  width: 340px;
+  padding: 20px;
+  background: #141424;
+  color: #e0e0e0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#canvas-container {
+  flex: 1;
+  position: relative;
+  background: #0a0a14;
+}
+
+h1 {
+  font-size: 1.5rem;
+  color: #00d4aa;
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: #888;
+  margin-top: -8px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+label {
+  font-size: 0.9rem;
+  color: #aaa;
+}
+
+.value {
+  color: #fff;
+  font-weight: bold;
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+button {
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  background: #00d4aa;
+  color: #141424;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+button:hover {
+  background: #00b894;
+}
+
+button:disabled {
+  background: #444;
+  color: #aaa;
+  cursor: not-allowed;
+}
+
+button.secondary {
+  background: #2d3561;
+  color: #eee;
+}
+
+button.secondary:hover {
+  background: #3d4575;
+}
+
+.button-row {
+  flex-direction: row;
+  gap: 10px;
+}
+
+.button-row button {
+  flex: 1;
+}
+
+#stats {
+  background: #0f0f1a;
+  border: 1px solid #2a2a45;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.5;
+}
+
+#progress {
+  text-align: center;
+  color: #00d4aa;
+  font-size: 0.95rem;
+}
+
+.hidden {
+  display: none !important;
+}
