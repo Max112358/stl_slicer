@@ -1,6 +1,6 @@
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import * as THREE from "three";
 import type { SliceShape } from "../types.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const EPS = 1e-6;
 
@@ -119,5 +119,5 @@ export function createSliceGeometry(
 
   if (geometries.length === 0) return null;
 
-  return BufferGeometryUtils.mergeGeometries(geometries);
+  return mergeGeometries(geometries);
 }

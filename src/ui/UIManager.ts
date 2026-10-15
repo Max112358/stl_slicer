@@ -1,5 +1,3 @@
-import type { Slicer } from "../slicer/index.js";
-
 export interface UIState {
   startHeight: number;
   thickness: number;
