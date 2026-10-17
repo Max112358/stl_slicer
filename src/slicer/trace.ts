@@ -5,6 +5,7 @@ const EPS = 1e-6;
 
 export function tracePolygons(segments: Segment[]): THREE.Vector3[][] {
   const points: THREE.Vector3[] = [];
+  const adj: number[][] = [];
   const indexByKey = new Map<string, number>();
 
   const snap = (n: number) => Math.round(n / EPS) * EPS;
@@ -16,12 +17,10 @@ export function tracePolygons(segments: Segment[]): THREE.Vector3[][] {
 
     const i = points.length;
     points.push(p.clone());
+    adj.push([]); // keep adjacency in sync with points
     indexByKey.set(key, i);
     return i;
   }
-
-  const adj: number[][] = [];
-  for (let i = 0; i < points.length; i++) adj.push([]);
 
   edges: for (const seg of segments) {
     const i = getIndex(seg.start);

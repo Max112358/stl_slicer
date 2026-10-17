@@ -16,29 +16,36 @@ const ui = new UIManager("sidebar");
 
 ui.onFileSelected(async (file) => {
   ui.setBusy(true);
+  try {
+    const geometry = await scene.loadSTL(file);
 
-  const geometry = await scene.loadSTL(file);
+    slicer = new Slicer(geometry);
+    const minZ = slicer.getMinZ();
+    const maxZ = slicer.getMaxZ();
 
-  slicer = new Slicer(geometry);
-  const minZ = slicer.getMinZ();
-  const maxZ = slicer.getMaxZ();
+    ui.setBounds(minZ, maxZ);
 
-  ui.setBounds(minZ, maxZ);
+    const size = geometry.boundingBox!.getSize(new THREE.Vector3());
+    const triCount = geometry.index
+      ? geometry.index.count / 3
+      : geometry.attributes.position.count / 3;
 
-  const size = geometry.boundingBox!.getSize(new THREE.Vector3());
-  const triCount = geometry.index
-    ? geometry.index.count / 3
-    : geometry.attributes.position.count / 3;
+    ui.setStats(
+      `<strong>Model:</strong> ${file.name}<br>` +
+        `<strong>Triangles:</strong> ${Math.round(triCount).toLocaleString()}<br>` +
+        `<strong>Bounds:</strong> ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} mm<br>` +
+        `<strong>Z range:</strong> ${minZ.toFixed(2)} to ${maxZ.toFixed(2)} mm`,
+    );
 
-  ui.setStats(
-    `<strong>Model:</strong> ${file.name}<br>` +
-      `<strong>Triangles:</strong> ${Math.round(triCount).toLocaleString()}<br>` +
-      `<strong>Bounds:</strong> ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} mm<br>` +
-      `<strong>Z range:</strong> ${minZ.toFixed(2)} to ${maxZ.toFixed(2)} mm`,
-  );
-
-  updateSlice();
-  ui.setBusy(false);
+    updateSlice();
+    // CHANGE 1: removed the ui.setBusy(false) here — the finally block
+    // below already handles it, so this line was redundant.
+  } catch (err) {
+    console.error(err);
+    ui.setStats("Failed to load or slice file.");
+  } finally {
+    ui.setBusy(false);
+  }
 });
 
 ui.onStateChange(() => {
@@ -60,12 +67,19 @@ ui.onExportAllSlices(async () => {
   if (!slicer) return;
 
   ui.setBusy(true);
-
-  const state = ui.getState();
-  const slices = slicer.sliceAll(state.thickness);
-  await downloadAllSlices(slices, state.thickness);
-
-  ui.setBusy(false);
+  // CHANGE 2: wrapped in try/finally so the buttons re-enable even if
+  // sliceAll() throws. Right now, any error in here permanently
+  // disables the whole UI.
+  try {
+    const state = ui.getState();
+    const slices = slicer.sliceAll(state.thickness);
+    await downloadAllSlices(slices, state.thickness);
+  } catch (err) {
+    console.error(err);
+    ui.setStats("Failed to export slices.");
+  } finally {
+    ui.setBusy(false);
+  }
 });
 
 function updateSlice(): void {
@@ -83,14 +97,11 @@ function updateSlice(): void {
 // Drag-and-drop support
 const canvasContainer = document.getElementById("canvas-container")!;
 canvasContainer.addEventListener("dragover", (e) => e.preventDefault());
-canvasContainer.addEventListener("drop", (e) => {
-  e.preventDefault();
-  const file = e.dataTransfer?.files[0];
-  if (file && file.name.toLowerCase().endsWith(".stl")) {
-    ui["onFile"]?.(file);
-  }
-});
 
+// CHANGE 3: removed the first duplicate drop handler. You had two
+// addEventListener("drop", ...) calls, so every dropped file was
+// processed TWICE (loaded, sliced, and camera-fitted two times).
+// Kept the one that uses the public handleFile() method.
 canvasContainer.addEventListener("drop", (e) => {
   e.preventDefault();
   const file = e.dataTransfer?.files[0];
