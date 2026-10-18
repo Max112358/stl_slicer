@@ -16,9 +16,9 @@ export class UIManager {
   private state: UIState = { startHeight: 0, thickness: 5, axis: "y" };
   private minZ = 0;
   private maxZ = 100;
-  // Thickness the user asked for. The slice actually cut is this clamped
-  // to whatever room is left between the slice start and the top of the
-  // model, so slices tile the model exactly — no overlap, no gap.
+  // Thickness the user asked for. Slice actually cut is this clamped to the
+  // room between the slice start and the top of the model, so slices tile
+  // the model exactly — no overlap, no gap.
   private nominalThickness = 5;
 
   private onChange?: ChangeHandler;
@@ -52,19 +52,26 @@ export class UIManager {
     this.nominalThickness = Math.min(this.nominalThickness, range);
     this.state.thickness = this.nominalThickness;
 
-    const startInput =
+    const startSlider =
       this.root.querySelector<HTMLInputElement>("#start-height")!;
-    const thicknessInput =
+    const thicknessSlider =
       this.root.querySelector<HTMLInputElement>("#thickness")!;
+    const startText = this.root.querySelector<HTMLInputElement>("#start-text")!;
+    const thicknessText =
+      this.root.querySelector<HTMLInputElement>("#thickness-text")!;
 
-    startInput.min = String(minZ);
-    startInput.max = String(maxZ);
-    startInput.value = String(this.state.startHeight);
-    startInput.step = String(range / 1000);
-
-    thicknessInput.max = String(range);
-    thicknessInput.value = String(this.state.thickness);
-    thicknessInput.step = String(range / 1000);
+    for (const input of [startSlider, startText]) {
+      input.min = String(minZ);
+      input.step = String(range / 1000);
+    }
+    for (const input of [thicknessSlider, thicknessText]) {
+      input.min = String(0);
+      input.step = String(range / 1000);
+    }
+    startSlider.max = String(maxZ);
+    thicknessSlider.max = String(range);
+    startText.max = String(maxZ);
+    thicknessText.max = String(range);
 
     this.updateLabels();
   }
@@ -99,10 +106,12 @@ export class UIManager {
     });
   }
 
+  private q<T extends HTMLElement>(selector: string): T {
+    return this.root.querySelector<T>(selector)!;
+  }
+
   // Effective thickness = user thickness clamped to the room left before
-  // the top of the model. The slice START is never adjusted backwards: if
-  // the remainder is shorter than the nominal thickness, the last slice is
-  // simply thinner, so the tail of the model is captured exactly once.
+  // the top of the model. The slice START is never adjusted backwards.
   private syncThickness(): void {
     const remaining = this.maxZ - this.state.startHeight;
     this.state.thickness = Math.min(
@@ -110,11 +119,60 @@ export class UIManager {
       Math.max(remaining, 0),
     );
 
-    const input = this.root.querySelector<HTMLInputElement>("#thickness")!;
-    input.value = String(this.state.thickness);
+    const hint = this.q<HTMLElement>("#trim-hint");
+    const trimmed = this.nominalThickness - this.state.thickness;
+    if (trimmed > 1e-9) {
+      hint.textContent =
+        `trimmed to ${this.state.thickness.toFixed(2)} mm ` +
+        `(ends at top of model)`;
+    } else {
+      hint.textContent = "";
+    }
+  }
 
-    this.root.querySelector<HTMLElement>("#thickness-val")!.textContent =
-      this.state.thickness.toFixed(2);
+  // Mirror the current values into every control WITHOUT fighting a field
+  // the user is currently typing in.
+  private updateLabels(): void {
+    const setValue = (
+      selector: string,
+      value: number,
+      decimals: number,
+    ): void => {
+      const el = this.q<HTMLInputElement>(selector);
+      if (document.activeElement === el) return;
+      el.value = value.toFixed(decimals);
+    };
+
+    setValue("#start-height", this.state.startHeight, 3);
+    setValue("#start-text", this.state.startHeight, 2);
+    setValue("#thickness", this.state.thickness, 3);
+    setValue("#thickness-text", this.state.thickness, 2);
+
+    this.q<HTMLElement>("#controls")?.classList.remove("hidden");
+  }
+
+  // The user typed into a number box: parse, clamp, flow through the
+  // usual path. Invalid/draft input (empty, half-typed `-`) is ignored
+  // until it parses.
+  private commitText(kind: "start" | "thickness"): void {
+    const input = this.q<HTMLInputElement>(
+      kind === "start" ? "#start-text" : "#thickness-text",
+    );
+    const value = parseFloat(input.value);
+    if (!Number.isFinite(value)) return;
+
+    if (kind === "start") {
+      this.state.startHeight = Math.min(Math.max(value, this.minZ), this.maxZ);
+      input.value = this.state.startHeight.toFixed(2);
+    } else {
+      const max = Math.max(this.maxZ - this.minZ, 1e-6);
+      this.nominalThickness = Math.min(Math.max(value, 0), max);
+      input.value = this.nominalThickness.toFixed(2);
+    }
+
+    this.syncThickness();
+    this.updateLabels();
+    this.onChange?.({ ...this.state });
   }
 
   private render(): void {
@@ -140,19 +198,24 @@ export class UIManager {
         </div>
 
         <div class="control-group">
-          <label>
-            Slice Start:
-            <span id="start-height-val" class="value">0</span> mm
-          </label>
-          <input type="range" id="start-height" min="0" max="100" step="0.1" value="0" />
+          <label for="start-text">Slice Start (mm)</label>
+          <div class="inline-controls">
+            <input type="number" id="start-text" class="num-input"
+                   min="0" max="100" step="0.1" value="0" />
+            <input type="range" id="start-height"
+                   min="0" max="100" step="0.1" value="0" />
+          </div>
         </div>
 
         <div class="control-group">
-          <label>
-            Slice Thickness:
-            <span id="thickness-val" class="value">5</span> mm
-          </label>
-          <input type="range" id="thickness" min="0.1" max="20" step="0.1" value="5" />
+          <label for="thickness-text">Slice Thickness (mm)</label>
+          <div class="inline-controls">
+            <input type="number" id="thickness-text" class="num-input"
+                   min="0" max="20" step="0.1" value="5" />
+            <input type="range" id="thickness"
+                   min="0" max="20" step="0.1" value="5" />
+          </div>
+          <div class="hint" id="trim-hint"></div>
         </div>
 
         <div class="control-group button-row">
@@ -171,20 +234,16 @@ export class UIManager {
   }
 
   private bindEvents(): void {
-    const fileInput = this.root.querySelector<HTMLInputElement>("#file-input")!;
-    const importBtn =
-      this.root.querySelector<HTMLButtonElement>("#btn-import")!;
-    const startInput =
-      this.root.querySelector<HTMLInputElement>("#start-height")!;
-    const thicknessInput =
-      this.root.querySelector<HTMLInputElement>("#thickness")!;
-    const prevBtn = this.root.querySelector<HTMLButtonElement>("#btn-prev")!;
-    const nextBtn = this.root.querySelector<HTMLButtonElement>("#btn-next")!;
-    const exportCurrentBtn = this.root.querySelector<HTMLButtonElement>(
-      "#btn-export-current",
-    )!;
-    const exportAllBtn =
-      this.root.querySelector<HTMLButtonElement>("#btn-export-all")!;
+    const fileInput = this.q<HTMLInputElement>("#file-input");
+    const importBtn = this.q<HTMLButtonElement>("#btn-import");
+    const startSlider = this.q<HTMLInputElement>("#start-height");
+    const thicknessSlider = this.q<HTMLInputElement>("#thickness");
+    const startText = this.q<HTMLInputElement>("#start-text");
+    const thicknessText = this.q<HTMLInputElement>("#thickness-text");
+    const prevBtn = this.q<HTMLButtonElement>("#btn-prev");
+    const nextBtn = this.q<HTMLButtonElement>("#btn-next");
+    const exportCurrentBtn = this.q<HTMLButtonElement>("#btn-export-current");
+    const exportAllBtn = this.q<HTMLButtonElement>("#btn-export-all");
 
     importBtn.addEventListener("click", () => fileInput.click());
 
@@ -201,16 +260,15 @@ export class UIManager {
           if (this.state.axis === axis) return;
           this.state.axis = axis;
           this.updateAxisButtons();
-          // main.ts sees the axis change, re-bases the slider bounds, and
-          // re-slices. setBounds() resets startHeight for the new axis.
+          // main.ts re-bases the slider bounds for the new axis.
           this.onChange?.({ ...this.state });
         });
       });
 
-    const update = () => {
-      this.state.startHeight = parseFloat(startInput.value);
-
-      const nominal = parseFloat(thicknessInput.value);
+    // Sliders: live update while dragging.
+    const updateFromSliders = () => {
+      this.state.startHeight = parseFloat(startSlider.value);
+      const nominal = parseFloat(thicknessSlider.value);
       if (nominal > 0) this.nominalThickness = nominal;
 
       this.syncThickness();
@@ -218,30 +276,42 @@ export class UIManager {
       this.onChange?.({ ...this.state });
     };
 
-    startInput.addEventListener("input", update);
-    thicknessInput.addEventListener("input", update);
+    startSlider.addEventListener("input", updateFromSliders);
+    thicknessSlider.addEventListener("input", updateFromSliders);
+
+    // Number boxes: apply on Enter/focus-out. A separate `input` listener
+    // keeps the preview live as long as the text parses.
+    for (const [input, kind] of [
+      [startText, "start"],
+      [thicknessText, "thickness"],
+    ] as const) {
+      input.addEventListener("input", () => {
+        if (Number.isFinite(parseFloat(input.value))) this.commitText(kind);
+      });
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") input.blur();
+      });
+      input.addEventListener("blur", () => this.commitText(kind));
+    }
 
     prevBtn.addEventListener("click", () => {
-      // Step back one full user-chosen slice; nominal, not the trimmed
-      // effective thickness, so Prev always lands on a slice boundary.
+      // Step back one full user-chosen slice so Prev lands on real
+      // boundaries even when the tail slice was trimmed.
       this.state.startHeight = Math.max(
         this.minZ,
         this.state.startHeight - this.nominalThickness,
       );
-      startInput.value = String(this.state.startHeight);
       this.syncThickness();
       this.updateLabels();
       this.onChange?.({ ...this.state });
     });
 
     nextBtn.addEventListener("click", () => {
-      // Jump forward to the end of the current slice. The start is never
-      // clamped backwards — if only a short remainder is left above, the
-      // slice thickness shrinks instead (see syncThickness).
+      // Jump to the end of the current slice. Never clamps the start
+      // backwards — the thickness shrinks instead (syncThickness).
       const next = this.state.startHeight + Math.max(this.state.thickness, 0);
-      if (next > this.maxZ - 1e-9) return; // already at the final slice
+      if (next > this.maxZ - 1e-9) return;
       this.state.startHeight = next;
-      startInput.value = String(this.state.startHeight);
       this.syncThickness();
       this.updateLabels();
       this.onChange?.({ ...this.state });
@@ -257,18 +327,6 @@ export class UIManager {
       .forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.axis === this.state.axis);
       });
-  }
-
-  private updateLabels(): void {
-    this.root.querySelector<HTMLElement>("#start-height-val")!.textContent =
-      this.state.startHeight.toFixed(2);
-
-    this.root.querySelector<HTMLElement>("#thickness-val")!.textContent =
-      this.state.thickness.toFixed(2);
-
-    this.root
-      .querySelector<HTMLElement>("#controls")
-      ?.classList.remove("hidden");
   }
 
   getState(): UIState {
