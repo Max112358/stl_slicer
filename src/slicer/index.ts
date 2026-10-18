@@ -2,10 +2,6 @@ import * as THREE from "three";
 import type { SliceAxis, SliceDiagnostics, Triangle } from "../types.js";
 import { extractSlab } from "./slab.js";
 
-// Keep slab boundaries a hair inside exact min/max so the last sliver
-// isn't a zero-thickness degenerate plane.
-const BOUNDARY_EPS = 1e-4;
-
 function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
   const position = geometry.attributes.position;
   const index = geometry.index;
