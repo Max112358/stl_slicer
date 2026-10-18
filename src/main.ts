@@ -66,6 +66,7 @@ ui.onExportCurrentSlice(() => {
   downloadSTL(
     currentSliceGeometry,
     `slice_${state.axis}${state.startHeight.toFixed(2)}_t${state.thickness.toFixed(1)}.stl`,
+    scene.getSTLTransform(),
   );
 });
 
@@ -76,7 +77,7 @@ ui.onExportAllSlices(async () => {
   try {
     const state = ui.getState();
     const slices = slicer.sliceAll(state.thickness);
-    await downloadAllSlices(slices, state.thickness);
+    await downloadAllSlices(slices, state.thickness, scene.getSTLTransform());
   } catch (err) {
     console.error(err);
     ui.setStats("Failed to export slices.");

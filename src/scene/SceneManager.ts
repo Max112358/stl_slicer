@@ -10,6 +10,12 @@ export class SceneManager {
   private originalMesh: THREE.Mesh | null = null;
   private sliceMesh: THREE.Mesh | null = null;
 
+  // Maps viewer/world coordinates back into the coordinate system of the
+  // STL file the user loaded. Slicing happens in viewer space, but anything
+  // we write back out must be expressed in the file's own space, or it will
+  // not line up with the model in any other viewer.
+  private stlTransform = new THREE.Matrix4();
+
   constructor(private container: HTMLElement) {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x0a0a14);
@@ -35,6 +41,16 @@ export class SceneManager {
     this.animate();
   }
 
+  /**
+   * World -> original STL file coordinates.
+   *
+   * Pass this to the exporters so a slice exports exactly where the cross
+   * section is inside the file you imported.
+   */
+  getSTLTransform(): THREE.Matrix4 {
+    return this.stlTransform.clone();
+  }
+
   private setupLights(): void {
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.6));
     const dir = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -55,16 +71,28 @@ export class SceneManager {
     const geometry = loader.parse(await file.arrayBuffer());
 
     // STL files are conventionally Z-up; three.js is Y-up. Stand the model
-    // upright so its height axis is world +Y.
-    geometry.rotateX(-Math.PI / 2);
+    // upright so its height axis is world +Y. Record the rotation instead of
+    // using rotateX() so we can undo it on export.
+    const rotation = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+    geometry.applyMatrix4(rotation);
 
-    // Ground it: center over the grid origin, lift so the lowest point
-    // sits at y = 0. This is why the minimum slice position is now 0.
+    // Ground it: center over the grid origin, lift so the lowest point sits
+    // at y = 0. Compute this AFTER the rotation, because rotating changes the
+    // bounding box.
     geometry.computeBoundingBox();
     const bb = geometry.boundingBox!;
     const center = bb.getCenter(new THREE.Vector3());
-    geometry.translate(-center.x, -bb.min.y, -center.z);
+    const grounding = new THREE.Matrix4().makeTranslation(
+      -center.x,
+      -bb.min.y,
+      -center.z,
+    );
+    geometry.applyMatrix4(grounding);
     geometry.computeBoundingBox();
+
+    // Full loading transform is `grounding * rotation`, so world -> file is
+    // its inverse.
+    this.stlTransform.multiplyMatrices(grounding, rotation).invert();
 
     if (this.originalMesh) {
       this.scene.remove(this.originalMesh);

@@ -58,8 +58,9 @@ export function intersectTrianglePlane(
     const denom = d0 - d1;
     if (Math.abs(denom) < EPS) return;
 
-    const t = d0 / denom;
-    if (t < -EPS || t > 1 + EPS) return;
+    // Clamp the parameter: an unclamped lerp could extend the segment a
+    // hair beyond the triangle when the plane grazes a vertex.
+    const t = Math.min(1, Math.max(0, d0 / denom));
 
     const p = new THREE.Vector3().lerpVectors(p0, p1, t);
     p[axis] = position; // snap exactly onto the cut plane

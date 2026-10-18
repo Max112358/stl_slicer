@@ -1,6 +1,9 @@
 import * as THREE from "three";
 
-export function geometryToSTLBlob(geometry: THREE.BufferGeometry): Blob {
+export function geometryToSTLBlob(
+  geometry: THREE.BufferGeometry,
+  transform?: THREE.Matrix4,
+): Blob {
   const position = geometry.attributes.position;
   const index = geometry.index;
 
@@ -37,6 +40,12 @@ export function geometryToSTLBlob(geometry: THREE.BufferGeometry): Blob {
     vB.fromBufferAttribute(position, i1);
     vC.fromBufferAttribute(position, i2);
 
+    if (transform) {
+      vA.applyMatrix4(transform);
+      vB.applyMatrix4(transform);
+      vC.applyMatrix4(transform);
+    }
+
     const normal = new THREE.Vector3()
       .subVectors(vB, vA)
       .cross(new THREE.Vector3().subVectors(vC, vA))
@@ -66,8 +75,9 @@ export function geometryToSTLBlob(geometry: THREE.BufferGeometry): Blob {
 export function downloadSTL(
   geometry: THREE.BufferGeometry,
   filename: string,
+  transform?: THREE.Matrix4,
 ): void {
-  const blob = geometryToSTLBlob(geometry);
+  const blob = geometryToSTLBlob(geometry, transform);
   const url = URL.createObjectURL(blob);
 
   const a = document.createElement("a");
