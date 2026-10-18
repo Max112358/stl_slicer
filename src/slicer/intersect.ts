@@ -3,11 +3,10 @@ import type { Segment, SliceAxis, Triangle } from "../types.js";
 
 // Plane-side classification tolerance.
 const EPS = 1e-5;
+
 // Vertex-welding tolerance. STL coordinates are float32 (~7 significant
 // digits), so the "same" intersection point computed from two neighboring
-// triangles can differ by ~1e-5 at 100 mm scale. The old 1e-6 was tighter
-// than the data's precision, so duplicates never merged and polygon
-// tracing silently fell apart.
+// triangles can differ by ~1e-5 at 100 mm scale.
 const WELD = 1e-4;
 
 export function intersectTrianglePlane(
@@ -49,19 +48,32 @@ export function intersectTrianglePlane(
     d0: number,
     d1: number,
   ): void {
+    // Whole edge lying in the cut plane: its two endpoints are the
+    // intersection.
     if (Math.abs(d0) < EPS && Math.abs(d1) < EPS) {
       add(p0);
       add(p1);
       return;
     }
 
-    const denom = d0 - d1;
-    if (Math.abs(denom) < EPS) return;
+    // A single endpoint on the plane contributes that endpoint.
+    if (Math.abs(d0) < EPS) {
+      add(p0);
+      return;
+    }
+    if (Math.abs(d1) < EPS) {
+      add(p1);
+      return;
+    }
 
-    // Clamp the parameter: an unclamped lerp could extend the segment a
-    // hair beyond the triangle when the plane grazes a vertex.
-    const t = Math.min(1, Math.max(0, d0 / denom));
+    // Both endpoints strictly on the same side: no crossing here. This is
+    // the test that must NOT be replaced by clamping t to [0,1] — clamping
+    // fabricates a point on the vertex and the triangle's real segment
+    // gets thrown away because it collects 3 points instead of 2.
+    if (d0 * d1 > 0) return;
 
+    // Strictly opposite signs, so t is genuinely inside (0, 1).
+    const t = d0 / (d0 - d1);
     const p = new THREE.Vector3().lerpVectors(p0, p1, t);
     p[axis] = position; // snap exactly onto the cut plane
     add(p);
