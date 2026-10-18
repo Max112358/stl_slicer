@@ -1,12 +1,17 @@
 import * as THREE from "three";
-import type { Segment, SliceAxis, SliceData, Triangle } from "../types.js";
+import type {
+  Segment,
+  SliceAxis,
+  SliceData,
+  SliceDiagnostics,
+  Triangle,
+} from "../types.js";
 import { intersectTrianglePlane } from "./intersect.js";
 import { tracePolygons } from "./trace.js";
 import {
   buildShapes,
   createSliceGeometry as buildSliceGeometry,
 } from "./shapes.js";
-import { projectPoint } from "./axis.js";
 
 // Keep cut planes a hair inside the exact min/max: a plane exactly at the
 // boundary only grazes vertices and produces no usable segments.
@@ -39,11 +44,19 @@ export class Slicer {
   private triangles: Triangle[];
   private bounds: THREE.Box3;
   private axis: SliceAxis = "y";
+  private gapTolerance: number;
 
   constructor(geometry: THREE.BufferGeometry) {
     geometry.computeBoundingBox();
     this.bounds = geometry.boundingBox!.clone();
     this.triangles = extractTriangles(geometry);
+
+    // Scale gap closing with the model: 0.2% of its largest dimension,
+    // but never smaller than the welding tolerance. Small cracks get
+    // stitched; genuinely missing surface does not.
+    const size = this.bounds.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    this.gapTolerance = Math.max(2e-4, maxDim * 0.002);
   }
 
   getBounds(): THREE.Box3 {
@@ -84,13 +97,31 @@ export class Slicer {
       .map((tri) => intersectTrianglePlane(tri, position, this.axis))
       .filter((seg): seg is Segment => seg !== null);
 
-    const loops = tracePolygons(segments);
-    const loops2D = loops.map((loop) =>
-      loop.map((p) => projectPoint(p, this.axis)),
-    );
-    const shapes = buildShapes(loops2D);
+    const traced = tracePolygons(segments, this.axis, this.gapTolerance);
+    const shapes = buildShapes(traced.loops);
 
-    return { axis: this.axis, start, position, shapes };
+    const diagnostics: SliceDiagnostics = {
+      contourCount: shapes.length,
+      autoClosedGaps: traced.autoClosedGaps,
+      droppedOpenChains: traced.droppedOpenChains,
+    };
+
+    if (traced.autoClosedGaps > 0) {
+      console.warn(
+        `[slicer] ${traced.autoClosedGaps} gap(s) auto-closed at ` +
+          `${this.axis}=${position.toFixed(3)} mm ` +
+          `(tolerance ${this.gapTolerance.toFixed(4)} mm).`,
+      );
+    }
+    if (traced.droppedOpenChains > 0) {
+      console.warn(
+        `[slicer] ${traced.droppedOpenChains} open contour(s) dropped at ` +
+          `${this.axis}=${position.toFixed(3)} mm — the mesh has cracks or ` +
+          `missing facets crossed by this cut.`,
+      );
+    }
+
+    return { axis: this.axis, start, position, shapes, diagnostics };
   }
 
   sliceAll(thickness: number): SliceData[] {

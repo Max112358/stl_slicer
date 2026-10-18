@@ -13,11 +13,18 @@ export interface Segment {
   end: THREE.Vector3;
 }
 
+export interface SliceDiagnostics {
+  contourCount: number;
+  autoClosedGaps: number;
+  droppedOpenChains: number;
+}
+
 export interface SliceData {
   axis: SliceAxis;
   start: number; // slab bottom, along the axis
   position: number; // where the cross-section was actually sampled
   shapes: SliceShape[];
+  diagnostics: SliceDiagnostics;
 }
 
 export interface SliceShape {

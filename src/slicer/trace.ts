@@ -1,45 +1,58 @@
 import * as THREE from "three";
-import type { Segment } from "../types.js";
+import type { Segment, SliceAxis } from "../types.js";
+import { projectPoint } from "./axis.js";
 
-// Welding tolerance for slice-plane vertices. Every triangle is cut
-// independently, so the point shared by two neighbouring segments is
-// computed twice in floating point and the two results can differ by
-// ~1e-5 mm on a 100 mm model (STL coordinates are float32).
+// Vertex welding tolerance, in slice-plane units (mm).
+//
+// Every triangle is cut independently, so the point shared by two
+// neighbouring segments is computed twice in float math and the results
+// can differ by ~1e-5 mm on a 100 mm model (STL coordinates are float32).
 const SNAP = 1e-4;
 
-export function tracePolygons(segments: Segment[]): THREE.Vector3[][] {
-  const points: THREE.Vector3[] = [];
+export interface TraceResult {
+  loops: THREE.Vector2[][];
+  autoClosedGaps: number;
+  droppedOpenChains: number;
+}
+
+function normalizeAngle(a: number): number {
+  const twoPi = Math.PI * 2;
+  return ((((a + Math.PI) % twoPi) + twoPi) % twoPi) - Math.PI;
+}
+
+export function tracePolygons(
+  segments: Segment[],
+  axis: SliceAxis,
+  gapTolerance = 0,
+): TraceResult {
+  const points: THREE.Vector2[] = [];
   const buckets = new Map<string, number[]>();
   const adj: number[][] = [];
 
-  const bucketKey = (bx: number, by: number, bz: number) => `${bx},${by},${bz}`;
+  const bucketKey = (bx: number, by: number) => `${bx},${by}`;
 
   function getIndex(p: THREE.Vector3): number {
-    const bx = Math.round(p.x / SNAP);
-    const by = Math.round(p.y / SNAP);
-    const bz = Math.round(p.z / SNAP);
+    const q = projectPoint(p, axis);
+    const bx = Math.round(q.x / SNAP);
+    const by = Math.round(q.y / SNAP);
 
-    // Check the 3x3x3 neighbourhood of grid cells so a point sitting on a
-    // cell boundary still merges with its twin from the neighbouring
-    // triangle. The old code hashed into a single cell and silently split
-    // such points, which is what shattered the contours.
+    // Search the 3x3 cell neighbourhood: a point sitting on a cell
+    // boundary must still merge with its twin computed by the
+    // neighbouring triangle.
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          const cell = buckets.get(bucketKey(bx + dx, by + dy, bz + dz));
-          if (!cell) continue;
-          for (const i of cell) {
-            if (points[i].distanceToSquared(p) < SNAP * SNAP) return i;
-          }
+        const cell = buckets.get(bucketKey(bx + dx, by + dy));
+        if (!cell) continue;
+        for (const i of cell) {
+          if (points[i].distanceToSquared(q) < SNAP * SNAP) return i;
         }
       }
     }
 
     const index = points.length;
-    points.push(p.clone());
-    adj.push([]);
+    points.push(q);
 
-    const key = bucketKey(bx, by, bz);
+    const key = bucketKey(bx, by);
     const cell = buckets.get(key);
     if (cell) cell.push(index);
     else buckets.set(key, [index]);
@@ -50,40 +63,82 @@ export function tracePolygons(segments: Segment[]): THREE.Vector3[][] {
     const i = getIndex(seg.start);
     const j = getIndex(seg.end);
     if (i === j) continue;
-    // Duplicated segment (coincident triangles) — keep the graph simple.
-    if (adj[i].includes(j)) continue;
+    if (adj[i].includes(j)) continue; // coincident duplicate
     adj[i].push(j);
     adj[j].push(i);
   }
 
-  const loops: THREE.Vector3[][] = [];
+  const used = new Set<string>();
+  const edgeKey = (a: number, b: number) => (a < b ? `${a}:${b}` : `${b}:${a}`);
 
-  function trace(start: number): THREE.Vector3[] | null {
-    const loop: THREE.Vector3[] = [];
+  function freeNeighbors(v: number): number[] {
+    return adj[v].filter((n) => !used.has(edgeKey(v, n)));
+  }
+
+  const angle = (from: number, to: number) =>
+    Math.atan2(points[to].y - points[from].y, points[to].x - points[from].x);
+
+  // Walk one chain. At a branch vertex (non-manifold or self-touching
+  // geometry) pick the edge that turns the most, so the walk stays on one
+  // contour instead of jumping onto an unrelated one.
+  function walk(start: number): { path: number[]; closed: boolean } {
+    const path: number[] = [start];
     let current = start;
+    let prev = -1;
 
     for (;;) {
-      loop.push(points[current]);
+      const candidates = freeNeighbors(current);
+      if (candidates.length === 0) break;
 
-      const next = adj[current].pop();
-      if (next === undefined) break; // dead end on degenerate input
+      let next = candidates[0];
+      if (candidates.length > 1 && prev !== -1) {
+        const inAngle = angle(prev, current);
+        let bestTurn = -Infinity;
+        for (const cand of candidates) {
+          const turn = normalizeAngle(angle(current, cand) - inAngle);
+          if (turn > bestTurn) {
+            bestTurn = turn;
+            next = cand;
+          }
+        }
+      }
 
-      const reverse = adj[next].indexOf(current);
-      if (reverse !== -1) adj[next].splice(reverse, 1);
-
+      used.add(edgeKey(current, next));
+      prev = current;
       current = next;
-      if (current === start) break;
+
+      if (current === start) return { path, closed: true };
+      path.push(current);
     }
 
-    return loop.length >= 3 ? loop : null;
+    return { path, closed: false };
   }
 
-  for (let start = 0; start < points.length; start++) {
-    while (adj[start].length > 0) {
-      const loop = trace(start);
-      if (loop) loops.push(loop);
+  const loops: THREE.Vector2[][] = [];
+  let autoClosedGaps = 0;
+  let droppedOpenChains = 0;
+
+  for (let v = 0; v < points.length; v++) {
+    while (freeNeighbors(v).length > 0) {
+      const { path, closed } = walk(v);
+      if (path.length < 3) continue;
+
+      const loop = path.map((i) => points[i]);
+      const first = points[path[0]];
+      const last = points[path[path.length - 1]];
+      const gap = first.distanceTo(last);
+
+      if (closed) {
+        loops.push(loop);
+      } else if (gap <= gapTolerance) {
+        // Crack in the mesh, small enough to stitch shut.
+        loops.push(loop);
+        autoClosedGaps++;
+      } else {
+        droppedOpenChains++;
+      }
     }
   }
 
-  return loops;
+  return { loops, autoClosedGaps, droppedOpenChains };
 }
