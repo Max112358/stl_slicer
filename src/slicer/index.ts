@@ -1,20 +1,9 @@
 import * as THREE from "three";
-import type {
-  Segment,
-  SliceAxis,
-  SliceData,
-  SliceDiagnostics,
-  Triangle,
-} from "../types.js";
-import { intersectTrianglePlane } from "./intersect.js";
-import { tracePolygons } from "./trace.js";
-import {
-  buildShapes,
-  createSliceGeometry as buildSliceGeometry,
-} from "./shapes.js";
+import type { SliceAxis, SliceDiagnostics, Triangle } from "../types.js";
+import { extractSlab } from "./slab.js";
 
-// Keep cut planes a hair inside the exact min/max: a plane exactly at the
-// boundary only grazes vertices and produces no usable segments.
+// Keep slab boundaries a hair inside exact min/max so the last sliver
+// isn't a zero-thickness degenerate plane.
 const BOUNDARY_EPS = 1e-4;
 
 function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
@@ -40,6 +29,14 @@ function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
   return triangles;
 }
 
+export interface SliceResult {
+  axis: SliceAxis;
+  start: number;
+  thickness: number;
+  geometry: THREE.BufferGeometry | null;
+  diagnostics: SliceDiagnostics;
+}
+
 export class Slicer {
   private triangles: Triangle[];
   private bounds: THREE.Box3;
@@ -52,8 +49,7 @@ export class Slicer {
     this.triangles = extractTriangles(geometry);
 
     // Scale gap closing with the model: 0.2% of its largest dimension,
-    // but never smaller than the welding tolerance. Small cracks get
-    // stitched; genuinely missing surface does not.
+    // never smaller than welding precision.
     const size = this.bounds.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     this.gapTolerance = Math.max(2e-4, maxDim * 0.002);
@@ -79,67 +75,52 @@ export class Slicer {
     return this.bounds.max[this.axis];
   }
 
-  // A slab spans [start, start + thickness], but sample the cross-section
-  // at its MIDDLE — never at the slab boundary.
-  getCutPosition(start: number, thickness: number): number {
-    const min = this.getMin();
-    const max = this.getMax();
-    const lo = min + BOUNDARY_EPS;
-    const hi = max - BOUNDARY_EPS;
-    if (hi <= lo) return (min + max) / 2;
-    return Math.min(Math.max(start + thickness / 2, lo), hi);
-  }
+  slice(start: number, thickness: number): SliceResult {
+    const lo = start;
+    const hi = start + thickness;
 
-  slice(start: number, thickness: number): SliceData {
-    const position = this.getCutPosition(start, thickness);
+    const extracted = extractSlab(
+      this.triangles,
+      this.axis,
+      lo,
+      hi,
+      this.gapTolerance,
+    );
 
-    const segments = this.triangles
-      .map((tri) => intersectTrianglePlane(tri, position, this.axis))
-      .filter((seg): seg is Segment => seg !== null);
-
-    const traced = tracePolygons(segments, this.axis, this.gapTolerance);
-    const shapes = buildShapes(traced.loops);
-
-    const diagnostics: SliceDiagnostics = {
-      contourCount: shapes.length,
-      autoClosedGaps: traced.autoClosedGaps,
-      droppedOpenChains: traced.droppedOpenChains,
-    };
-
-    if (traced.autoClosedGaps > 0) {
+    const d = extracted.diagnostics;
+    if (d.autoClosedGaps > 0) {
       console.warn(
-        `[slicer] ${traced.autoClosedGaps} gap(s) auto-closed at ` +
-          `${this.axis}=${position.toFixed(3)} mm ` +
+        `[slicer] ${d.autoClosedGaps} gap(s) auto-closed in slab ` +
+          `${this.axis} ${lo.toFixed(2)}..${hi.toFixed(2)} mm ` +
           `(tolerance ${this.gapTolerance.toFixed(4)} mm).`,
       );
     }
-    if (traced.droppedOpenChains > 0) {
+    if (d.droppedOpenChains > 0) {
       console.warn(
-        `[slicer] ${traced.droppedOpenChains} open contour(s) dropped at ` +
-          `${this.axis}=${position.toFixed(3)} mm — the mesh has cracks or ` +
-          `missing facets crossed by this cut.`,
+        `[slicer] ${d.droppedOpenChains} open contour(s) dropped in slab ` +
+          `${this.axis} ${lo.toFixed(2)}..${hi.toFixed(2)} mm — the mesh ` +
+          `has cracks or missing facets crossed by this cut.`,
       );
     }
 
-    return { axis: this.axis, start, position, shapes, diagnostics };
+    return {
+      axis: this.axis,
+      start,
+      thickness,
+      geometry: extracted.geometry,
+      diagnostics: extracted.diagnostics,
+    };
   }
 
-  sliceAll(thickness: number): SliceData[] {
+  sliceAll(thickness: number): SliceResult[] {
     const min = this.getMin();
     const max = this.getMax();
-    const slices: SliceData[] = [];
+    const slices: SliceResult[] = [];
 
     for (let start = min; start < max - BOUNDARY_EPS; start += thickness) {
       slices.push(this.slice(start, thickness));
     }
 
     return slices;
-  }
-
-  createSliceGeometry(
-    slice: SliceData,
-    thickness: number,
-  ): THREE.BufferGeometry | null {
-    return buildSliceGeometry(slice.start, slice.shapes, thickness, slice.axis);
   }
 }

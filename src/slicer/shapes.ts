@@ -1,11 +1,9 @@
+import type { SliceShape } from "../types.js";
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import type { SliceAxis, SliceShape } from "../types.js";
-import { makeSliceMatrix } from "./axis.js";
 
 const DUP_EPS = 1e-6;
 
-function signedArea2D(loop: THREE.Vector2[]): number {
+export function signedArea2D(loop: THREE.Vector2[]): number {
   let area = 0;
   const n = loop.length;
   for (let i = 0; i < n; i++) {
@@ -31,7 +29,6 @@ function cleanLoop(loop: THREE.Vector2[]): THREE.Vector2[] {
   return out;
 }
 
-// Classic even-odd ray cast (PNPOLY).
 function pointInLoop(point: THREE.Vector2, loop: THREE.Vector2[]): boolean {
   let inside = false;
   const n = loop.length;
@@ -57,14 +54,8 @@ function edgeMidpoint(loop: THREE.Vector2[]): THREE.Vector2 {
 }
 
 /**
- * Group traced contours into solids-with-holes.
- *
- * This deliberately does NOT use winding direction: tracing an unoriented
- * segment soup yields loops whose direction is essentially random, so the
- * "positive area = outer" test flipped from slice to slice and produced
- * exactly the garbled geometry you were seeing. Instead, count how deeply
- * each contour is nested in the others: even depth = solid island, odd
- * depth = hole. This also handles islands inside holes.
+ * Group traced contours into solids-with-holes using nesting depth only
+ * (never winding — traced loop directions are arbitrary).
  */
 export function buildShapes(loops: THREE.Vector2[][]): SliceShape[] {
   const contours = loops
@@ -104,7 +95,6 @@ export function buildShapes(loops: THREE.Vector2[][]): SliceShape[] {
   for (let i = 0; i < count; i++) {
     if (depth[i] % 2 === 0) continue;
 
-    // Climb to the nearest enclosing solid island.
     let shell = parent[i];
     const seen = new Set<number>();
     while (shell !== -1 && depth[shell] % 2 !== 0 && !seen.has(shell)) {
@@ -116,62 +106,4 @@ export function buildShapes(loops: THREE.Vector2[][]): SliceShape[] {
   }
 
   return shapes;
-}
-
-function orient(
-  loop: THREE.Vector2[],
-  counterclockwise: boolean,
-): THREE.Vector2[] {
-  return signedArea2D(loop) > 0 === counterclockwise
-    ? loop
-    : [...loop].reverse();
-}
-
-export function createSliceGeometry(
-  start: number,
-  shapes: SliceShape[],
-  thickness: number,
-  axis: SliceAxis,
-): THREE.BufferGeometry | null {
-  const geometries: THREE.BufferGeometry[] = [];
-
-  for (const { outer, holes } of shapes) {
-    const contour = orient(cleanLoop(outer), true);
-    if (contour.length < 3) continue;
-
-    const shape = new THREE.Shape();
-    shape.moveTo(contour[0].x, contour[0].y);
-    for (let i = 1; i < contour.length; i++) {
-      shape.lineTo(contour[i].x, contour[i].y);
-    }
-    shape.closePath();
-
-    for (const hole of holes) {
-      const points = orient(cleanLoop(hole), false);
-      if (points.length < 3) continue;
-
-      const path = new THREE.Path();
-      path.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        path.lineTo(points[i].x, points[i].y);
-      }
-      path.closePath();
-      shape.holes.push(path);
-    }
-
-    const geometry = new THREE.ExtrudeGeometry(shape, {
-      depth: thickness,
-      bevelEnabled: false,
-      steps: 1,
-    });
-
-    geometry.applyMatrix4(makeSliceMatrix(axis, start));
-    geometries.push(geometry);
-  }
-
-  if (geometries.length === 0) return null;
-
-  const merged = mergeGeometries(geometries);
-  geometries.forEach((g) => g.dispose());
-  return merged;
 }

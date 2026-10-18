@@ -13,7 +13,13 @@ export interface Segment {
   end: THREE.Vector3;
 }
 
+export interface SliceShape {
+  outer: THREE.Vector2[];
+  holes: THREE.Vector2[][];
+}
+
 export interface SliceDiagnostics {
+  /** Closed rings found on the cut faces of the slab. */
   contourCount: number;
   autoClosedGaps: number;
   droppedOpenChains: number;

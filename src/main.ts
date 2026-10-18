@@ -99,13 +99,13 @@ function updateSlice(): void {
   if (!slicer) return;
 
   const state = ui.getState();
-  const sliceData = slicer.slice(state.startHeight, state.thickness);
+  const slice = slicer.slice(state.startHeight, state.thickness);
 
   currentSliceGeometry?.dispose();
-  currentSliceGeometry = slicer.createSliceGeometry(sliceData, state.thickness);
+  currentSliceGeometry = slice.geometry;
   scene.showSlice(currentSliceGeometry);
 
-  const d = sliceData.diagnostics;
+  const d = slice.diagnostics;
   const issues: string[] = [];
   if (d.autoClosedGaps > 0) {
     issues.push(`auto-closed ${d.autoClosedGaps} gap(s)`);
@@ -122,8 +122,8 @@ function updateSlice(): void {
 
   const emptyHtml = currentSliceGeometry
     ? ""
-    : `<br><span style="color:#ff6b6b"><strong>No closed cross-section</strong> at ` +
-      `${state.startHeight.toFixed(2)} ± ${(state.thickness / 2).toFixed(2)} mm</span>`;
+    : `<br><span style="color:#ff6b6b"><strong>No solid material</strong> between ` +
+      `${state.startHeight.toFixed(2)} and ${(state.startHeight + state.thickness).toFixed(2)} mm</span>`;
 
   ui.setStats(
     modelStats +

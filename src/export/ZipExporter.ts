@@ -1,11 +1,10 @@
 import type { Matrix4 } from "three";
 import JSZip from "jszip";
 import { geometryToSTLBlob } from "./STLExporter.js";
-import type { SliceData } from "../types.js";
-import { createSliceGeometry } from "../slicer/shapes.js";
+import type { SliceResult } from "../slicer/index.js";
 
 export async function downloadAllSlices(
-  slices: SliceData[],
+  slices: SliceResult[],
   thickness: number,
   transform?: Matrix4,
 ): Promise<void> {
@@ -15,21 +14,13 @@ export async function downloadAllSlices(
   if (!folder) return;
 
   for (let i = 0; i < slices.length; i++) {
-    const slice = slices[i];
-    const geometry = createSliceGeometry(
-      slice.start,
-      slice.shapes,
-      thickness,
-      slice.axis,
-    );
+    const geometry = slices[i].geometry;
     if (!geometry) continue;
 
-    if (transform) geometry.applyMatrix4(transform);
-
     const filename =
-      `slice_${String(i + 1).padStart(3, "0")}_` +
-      `${slice.axis}${slice.start.toFixed(2)}.stl`;
-    folder.file(filename, geometryToSTLBlob(geometry));
+      `slice_${String(i + 1).padStart(3, "0")}_${slices[i].axis}` +
+      `${slices[i].start.toFixed(2)}.stl`;
+    folder.file(filename, geometryToSTLBlob(geometry, transform));
     geometry.dispose();
   }
 
