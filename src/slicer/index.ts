@@ -117,8 +117,15 @@ export class Slicer {
     const max = this.getMax();
     const slices: SliceResult[] = [];
 
-    for (let start = min; start < max - BOUNDARY_EPS; start += thickness) {
-      slices.push(this.slice(start, thickness));
+    // Integer number of slabs, so starts hit exact multiples and the last
+    // slab is trimmed to end exactly at the top of the model.
+    const count = Math.ceil((max - min) / thickness - 1e-9);
+
+    for (let i = 0; i < count; i++) {
+      const start = min + i * thickness;
+      const slabThickness = Math.min(thickness, max - start);
+      if (slabThickness <= 0) continue;
+      slices.push(this.slice(start, slabThickness));
     }
 
     return slices;

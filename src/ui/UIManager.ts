@@ -2,6 +2,7 @@ import type { SliceAxis } from "../types.js";
 
 export interface UIState {
   startHeight: number;
+  /** Effective thickness: nominal clamped to the room left above start. */
   thickness: number;
   axis: SliceAxis;
 }
@@ -15,6 +16,10 @@ export class UIManager {
   private state: UIState = { startHeight: 0, thickness: 5, axis: "y" };
   private minZ = 0;
   private maxZ = 100;
+  // Thickness the user asked for. The slice actually cut is this clamped
+  // to whatever room is left between the slice start and the top of the
+  // model, so slices tile the model exactly — no overlap, no gap.
+  private nominalThickness = 5;
 
   private onChange?: ChangeHandler;
   private onFile?: FileHandler;
@@ -41,8 +46,11 @@ export class UIManager {
     this.minZ = minZ;
     this.maxZ = maxZ;
 
+    const range = Math.max(maxZ - minZ, 1e-6);
+
     this.state.startHeight = minZ;
-    this.state.thickness = Math.min(this.state.thickness, maxZ - minZ);
+    this.nominalThickness = Math.min(this.nominalThickness, range);
+    this.state.thickness = this.nominalThickness;
 
     const startInput =
       this.root.querySelector<HTMLInputElement>("#start-height")!;
@@ -52,11 +60,11 @@ export class UIManager {
     startInput.min = String(minZ);
     startInput.max = String(maxZ);
     startInput.value = String(this.state.startHeight);
-    startInput.step = String((maxZ - minZ) / 1000);
+    startInput.step = String(range / 1000);
 
-    thicknessInput.max = String(maxZ - minZ);
+    thicknessInput.max = String(range);
     thicknessInput.value = String(this.state.thickness);
-    thicknessInput.step = String((maxZ - minZ) / 1000);
+    thicknessInput.step = String(range / 1000);
 
     this.updateLabels();
   }
@@ -89,6 +97,24 @@ export class UIManager {
     this.root.querySelectorAll("button, input").forEach((el) => {
       (el as HTMLButtonElement | HTMLInputElement).disabled = busy;
     });
+  }
+
+  // Effective thickness = user thickness clamped to the room left before
+  // the top of the model. The slice START is never adjusted backwards: if
+  // the remainder is shorter than the nominal thickness, the last slice is
+  // simply thinner, so the tail of the model is captured exactly once.
+  private syncThickness(): void {
+    const remaining = this.maxZ - this.state.startHeight;
+    this.state.thickness = Math.min(
+      this.nominalThickness,
+      Math.max(remaining, 0),
+    );
+
+    const input = this.root.querySelector<HTMLInputElement>("#thickness")!;
+    input.value = String(this.state.thickness);
+
+    this.root.querySelector<HTMLElement>("#thickness-val")!.textContent =
+      this.state.thickness.toFixed(2);
   }
 
   private render(): void {
@@ -176,23 +202,18 @@ export class UIManager {
           this.state.axis = axis;
           this.updateAxisButtons();
           // main.ts sees the axis change, re-bases the slider bounds, and
-          // re-slices. We intentionally do NOT reset startHeight here —
-          // setBounds() does that when the new axis bounds arrive.
+          // re-slices. setBounds() resets startHeight for the new axis.
           this.onChange?.({ ...this.state });
         });
       });
 
     const update = () => {
       this.state.startHeight = parseFloat(startInput.value);
-      this.state.thickness = parseFloat(thicknessInput.value);
 
-      // Clamp start + thickness inside the model
-      const maxStart = this.maxZ - this.state.thickness;
-      if (this.state.startHeight > maxStart) {
-        this.state.startHeight = maxStart;
-        startInput.value = String(maxStart);
-      }
+      const nominal = parseFloat(thicknessInput.value);
+      if (nominal > 0) this.nominalThickness = nominal;
 
+      this.syncThickness();
       this.updateLabels();
       this.onChange?.({ ...this.state });
     };
@@ -201,22 +222,27 @@ export class UIManager {
     thicknessInput.addEventListener("input", update);
 
     prevBtn.addEventListener("click", () => {
+      // Step back one full user-chosen slice; nominal, not the trimmed
+      // effective thickness, so Prev always lands on a slice boundary.
       this.state.startHeight = Math.max(
         this.minZ,
-        this.state.startHeight - this.state.thickness,
+        this.state.startHeight - this.nominalThickness,
       );
       startInput.value = String(this.state.startHeight);
+      this.syncThickness();
       this.updateLabels();
       this.onChange?.({ ...this.state });
     });
 
     nextBtn.addEventListener("click", () => {
-      const maxStart = this.maxZ - this.state.thickness;
-      this.state.startHeight = Math.min(
-        Math.max(this.minZ, maxStart),
-        this.state.startHeight + this.state.thickness,
-      );
+      // Jump forward to the end of the current slice. The start is never
+      // clamped backwards — if only a short remainder is left above, the
+      // slice thickness shrinks instead (see syncThickness).
+      const next = this.state.startHeight + Math.max(this.state.thickness, 0);
+      if (next > this.maxZ - 1e-9) return; // already at the final slice
+      this.state.startHeight = next;
       startInput.value = String(this.state.startHeight);
+      this.syncThickness();
       this.updateLabels();
       this.onChange?.({ ...this.state });
     });
