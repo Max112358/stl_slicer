@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+export type SliceAxis = "x" | "y" | "z";
+
 export interface Triangle {
   a: THREE.Vector3;
   b: THREE.Vector3;
@@ -12,13 +14,15 @@ export interface Segment {
 }
 
 export interface SliceData {
-  z: number;
+  axis: SliceAxis;
+  start: number; // slab bottom, along the axis
+  position: number; // where the cross-section was actually sampled
   shapes: SliceShape[];
 }
 
 export interface SliceShape {
-  outer: THREE.Vector3[];
-  holes: THREE.Vector3[][];
+  outer: THREE.Vector2[];
+  holes: THREE.Vector2[][];
 }
 
 export interface SliceSettings {

@@ -1,23 +1,30 @@
 import * as THREE from "three";
 import type { Segment } from "../types.js";
 
-const EPS = 1e-6;
+// Quantization grid for vertex welding: coarse enough to merge the float32
+// duplicates produced by per-triangle intersection math, fine enough to
+// keep real corners apart.
+const SNAP = 1e-4;
 
 export function tracePolygons(segments: Segment[]): THREE.Vector3[][] {
   const points: THREE.Vector3[] = [];
   const adj: number[][] = [];
   const indexByKey = new Map<string, number>();
 
-  const snap = (n: number) => Math.round(n / EPS) * EPS;
+  // Integer bucket keys. The old Math.round(n / EPS) * EPS round-tripped
+  // through floating point and re-introduced error into the key string,
+  // so the same point could hash two different ways.
+  const keyOf = (p: THREE.Vector3): string =>
+    `${Math.round(p.x / SNAP)},${Math.round(p.y / SNAP)},${Math.round(p.z / SNAP)}`;
 
   function getIndex(p: THREE.Vector3): number {
-    const key = `${snap(p.x)},${snap(p.y)},${snap(p.z)}`;
+    const key = keyOf(p);
     const existing = indexByKey.get(key);
     if (existing !== undefined) return existing;
 
     const i = points.length;
     points.push(p.clone());
-    adj.push([]); // keep adjacency in sync with points
+    adj.push([]);
     indexByKey.set(key, i);
     return i;
   }

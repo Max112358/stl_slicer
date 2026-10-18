@@ -1,6 +1,9 @@
+import type { SliceAxis } from "../types.js";
+
 export interface UIState {
   startHeight: number;
   thickness: number;
+  axis: SliceAxis;
 }
 
 export type ChangeHandler = (state: UIState) => void;
@@ -9,7 +12,7 @@ export type ActionHandler = () => void;
 
 export class UIManager {
   private root: HTMLElement;
-  private state: UIState = { startHeight: 0, thickness: 5 };
+  private state: UIState = { startHeight: 0, thickness: 5, axis: "y" };
   private minZ = 0;
   private maxZ = 100;
 
@@ -25,12 +28,15 @@ export class UIManager {
 
     this.render();
     this.bindEvents();
+    this.updateAxisButtons();
   }
 
   handleFile(file: File): void {
     this.onFile?.(file);
   }
 
+  // Bounds are along the CURRENT slice axis. main.ts calls this on load
+  // and again whenever the orientation buttons change the axis.
   setBounds(minZ: number, maxZ: number): void {
     this.minZ = minZ;
     this.maxZ = maxZ;
@@ -99,8 +105,17 @@ export class UIManager {
 
       <div id="controls" class="hidden">
         <div class="control-group">
+          <label>Slice Orientation</label>
+          <div class="control-group button-row" id="axis-buttons">
+            <button data-axis="y" class="secondary">Up–Down</button>
+            <button data-axis="x" class="secondary">Left–Right</button>
+            <button data-axis="z" class="secondary">Front–Back</button>
+          </div>
+        </div>
+
+        <div class="control-group">
           <label>
-            Start Height:
+            Slice Start:
             <span id="start-height-val" class="value">0</span> mm
           </label>
           <input type="range" id="start-height" min="0" max="100" step="0.1" value="0" />
@@ -152,6 +167,21 @@ export class UIManager {
       if (file) this.onFile?.(file);
     });
 
+    this.root
+      .querySelectorAll<HTMLButtonElement>("[data-axis]")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const axis = btn.dataset.axis as SliceAxis;
+          if (this.state.axis === axis) return;
+          this.state.axis = axis;
+          this.updateAxisButtons();
+          // main.ts sees the axis change, re-bases the slider bounds, and
+          // re-slices. We intentionally do NOT reset startHeight here —
+          // setBounds() does that when the new axis bounds arrive.
+          this.onChange?.({ ...this.state });
+        });
+      });
+
     const update = () => {
       this.state.startHeight = parseFloat(startInput.value);
       this.state.thickness = parseFloat(thicknessInput.value);
@@ -183,7 +213,7 @@ export class UIManager {
     nextBtn.addEventListener("click", () => {
       const maxStart = this.maxZ - this.state.thickness;
       this.state.startHeight = Math.min(
-        maxStart,
+        Math.max(this.minZ, maxStart),
         this.state.startHeight + this.state.thickness,
       );
       startInput.value = String(this.state.startHeight);
@@ -193,6 +223,14 @@ export class UIManager {
 
     exportCurrentBtn.addEventListener("click", () => this.onExportCurrent?.());
     exportAllBtn.addEventListener("click", () => this.onExportAll?.());
+  }
+
+  private updateAxisButtons(): void {
+    this.root
+      .querySelectorAll<HTMLButtonElement>("[data-axis]")
+      .forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.axis === this.state.axis);
+      });
   }
 
   private updateLabels(): void {

@@ -43,12 +43,28 @@ export class SceneManager {
   }
 
   private setupGrid(): void {
-    this.scene.add(new THREE.GridHelper(400, 40, 0x333355, 0x1a1a2e));
+    const grid = new THREE.GridHelper(400, 40, 0x333355, 0x1a1a2e);
+    // Sit the grid a hair below y=0 so a slab whose bottom face is exactly
+    // at 0 doesn't z-fight with the grid lines when viewed from below.
+    grid.position.y = -0.01;
+    this.scene.add(grid);
   }
 
   async loadSTL(file: File): Promise<THREE.BufferGeometry> {
     const loader = new STLLoader();
     const geometry = loader.parse(await file.arrayBuffer());
+
+    // STL files are conventionally Z-up; three.js is Y-up. Stand the model
+    // upright so its height axis is world +Y.
+    geometry.rotateX(-Math.PI / 2);
+
+    // Ground it: center over the grid origin, lift so the lowest point
+    // sits at y = 0. This is why the minimum slice position is now 0.
+    geometry.computeBoundingBox();
+    const bb = geometry.boundingBox!;
+    const center = bb.getCenter(new THREE.Vector3());
+    geometry.translate(-center.x, -bb.min.y, -center.z);
+    geometry.computeBoundingBox();
 
     if (this.originalMesh) {
       this.scene.remove(this.originalMesh);

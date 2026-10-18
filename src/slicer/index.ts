@@ -1,8 +1,22 @@
 import * as THREE from "three";
-import type { SliceData, Triangle } from "../types.js";
+import type {
+  Segment,
+  SliceAxis,
+  SliceData,
+  SliceShape,
+  Triangle,
+} from "../types.js";
 import { intersectTrianglePlane } from "./intersect.js";
 import { tracePolygons } from "./trace.js";
-import { buildShapes, createSliceGeometry } from "./shapes.js";
+import {
+  buildShapes,
+  createSliceGeometry as buildSliceGeometry,
+} from "./shapes.js";
+import { projectPoint } from "./axis.js";
+
+// Keep cut planes a hair inside the exact min/max: a plane exactly at the
+// boundary only grazes vertices and produces no usable segments.
+const BOUNDARY_EPS = 1e-4;
 
 function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
   const position = geometry.attributes.position;
@@ -34,6 +48,7 @@ function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
 export class Slicer {
   private triangles: Triangle[];
   private bounds: THREE.Box3;
+  private axis: SliceAxis = "y";
 
   constructor(geometry: THREE.BufferGeometry) {
     geometry.computeBoundingBox();
@@ -45,33 +60,58 @@ export class Slicer {
     return this.bounds.clone();
   }
 
-  getMinZ(): number {
-    return this.bounds.min.z;
+  getAxis(): SliceAxis {
+    return this.axis;
   }
 
-  getMaxZ(): number {
-    return this.bounds.max.z;
+  setAxis(axis: SliceAxis): void {
+    this.axis = axis;
   }
 
-  sliceAt(z: number): SliceData {
+  getMin(): number {
+    return this.bounds.min[this.axis];
+  }
+
+  getMax(): number {
+    return this.bounds.max[this.axis];
+  }
+
+  // A slab spans [start, start + thickness], but sample the cross-section
+  // at its MIDDLE — never at the slab boundary. Sampling the exact start
+  // height fails whenever it coincides with min/max or a flat face, which
+  // is why some heights produced no preview no matter the thickness.
+  getCutPosition(start: number, thickness: number): number {
+    const min = this.getMin();
+    const max = this.getMax();
+    const lo = min + BOUNDARY_EPS;
+    const hi = max - BOUNDARY_EPS;
+    if (hi <= lo) return (min + max) / 2;
+    return Math.min(Math.max(start + thickness / 2, lo), hi);
+  }
+
+  slice(start: number, thickness: number): SliceData {
+    const position = this.getCutPosition(start, thickness);
+
     const segments = this.triangles
-      .map((tri) => intersectTrianglePlane(tri, z))
-      .filter((seg): seg is NonNullable<typeof seg> => seg !== null);
+      .map((tri) => intersectTrianglePlane(tri, position, this.axis))
+      .filter((seg): seg is Segment => seg !== null);
 
     const loops = tracePolygons(segments);
-    const shapes = buildShapes(loops);
+    const loops2D = loops.map((loop) =>
+      loop.map((p) => projectPoint(p, this.axis)),
+    );
+    const shapes = buildShapes(loops2D);
 
-    return { z, shapes };
+    return { axis: this.axis, start, position, shapes };
   }
 
   sliceAll(thickness: number): SliceData[] {
-    const { min, max } = this.bounds;
+    const min = this.getMin();
+    const max = this.getMax();
     const slices: SliceData[] = [];
-    let z = min.z;
 
-    while (z <= max.z + 1e-6) {
-      slices.push(this.sliceAt(Math.min(z, max.z)));
-      z += thickness;
+    for (let start = min; start < max - BOUNDARY_EPS; start += thickness) {
+      slices.push(this.slice(start, thickness));
     }
 
     return slices;
@@ -81,6 +121,6 @@ export class Slicer {
     slice: SliceData,
     thickness: number,
   ): THREE.BufferGeometry | null {
-    return createSliceGeometry(slice.z, slice.shapes, thickness);
+    return buildSliceGeometry(slice.start, slice.shapes, thickness, slice.axis);
   }
 }

@@ -125,3 +125,13 @@ button.secondary:hover {
 .hidden {
   display: none !important;
 }
+
+#axis-buttons button {
+  padding: 8px;
+  font-size: 0.8rem;
+}
+
+button.active {
+  background: #00d4aa;
+  color: #141424;
+}

@@ -14,12 +14,19 @@ export async function downloadAllSlices(
 
   for (let i = 0; i < slices.length; i++) {
     const slice = slices[i];
-    const geometry = createSliceGeometry(slice.z, slice.shapes, thickness);
+    const geometry = createSliceGeometry(
+      slice.start,
+      slice.shapes,
+      thickness,
+      slice.axis,
+    );
     if (!geometry) continue;
 
-    const z = slice.z.toFixed(2);
-    const filename = `slice_${String(i + 1).padStart(3, "0")}_z${z}.stl`;
+    const filename =
+      `slice_${String(i + 1).padStart(3, "0")}_` +
+      `${slice.axis}${slice.start.toFixed(2)}.stl`;
     folder.file(filename, geometryToSTLBlob(geometry));
+    geometry.dispose();
   }
 
   const blob = await zip.generateAsync({ type: "blob" });

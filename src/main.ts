@@ -20,10 +20,11 @@ ui.onFileSelected(async (file) => {
     const geometry = await scene.loadSTL(file);
 
     slicer = new Slicer(geometry);
-    const minZ = slicer.getMinZ();
-    const maxZ = slicer.getMaxZ();
+    slicer.setAxis(ui.getState().axis);
 
-    ui.setBounds(minZ, maxZ);
+    const min = slicer.getMin();
+    const max = slicer.getMax();
+    ui.setBounds(min, max);
 
     const size = geometry.boundingBox!.getSize(new THREE.Vector3());
     const triCount = geometry.index
@@ -34,12 +35,10 @@ ui.onFileSelected(async (file) => {
       `<strong>Model:</strong> ${file.name}<br>` +
         `<strong>Triangles:</strong> ${Math.round(triCount).toLocaleString()}<br>` +
         `<strong>Bounds:</strong> ${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)} mm<br>` +
-        `<strong>Z range:</strong> ${minZ.toFixed(2)} to ${maxZ.toFixed(2)} mm`,
+        `<strong>Height range:</strong> ${min.toFixed(2)} to ${max.toFixed(2)} mm`,
     );
 
     updateSlice();
-    // CHANGE 1: removed the ui.setBusy(false) here — the finally block
-    // below already handles it, so this line was redundant.
   } catch (err) {
     console.error(err);
     ui.setStats("Failed to load or slice file.");
@@ -49,6 +48,14 @@ ui.onFileSelected(async (file) => {
 });
 
 ui.onStateChange(() => {
+  if (!slicer) return;
+
+  // Orientation change: re-base the slider onto the new axis, then slice.
+  if (slicer.getAxis() !== ui.getState().axis) {
+    slicer.setAxis(ui.getState().axis);
+    ui.setBounds(slicer.getMin(), slicer.getMax());
+  }
+
   updateSlice();
 });
 
@@ -56,12 +63,23 @@ ui.onExportCurrentSlice(() => {
   if (!currentSliceGeometry || !slicer) return;
 
   const state = ui.getState();
-  const z = state.startHeight.toFixed(2);
   downloadSTL(
     currentSliceGeometry,
-    `slice_z${z}_t${state.thickness.toFixed(1)}.stl`,
+    `slice_${state.axis}${state.startHeight.toFixed(2)}_t${state.thickness.toFixed(1)}.stl`,
   );
 });
+
+function updateSlice(): void {
+  if (!slicer) return;
+
+  const state = ui.getState();
+  const sliceData = slicer.slice(state.startHeight, state.thickness);
+
+  currentSliceGeometry?.dispose();
+  currentSliceGeometry = slicer.createSliceGeometry(sliceData, state.thickness);
+
+  scene.showSlice(currentSliceGeometry);
+}
 
 ui.onExportAllSlices(async () => {
   if (!slicer) return;
@@ -81,18 +99,6 @@ ui.onExportAllSlices(async () => {
     ui.setBusy(false);
   }
 });
-
-function updateSlice(): void {
-  if (!slicer) return;
-
-  const state = ui.getState();
-  const sliceData = slicer.sliceAt(state.startHeight);
-
-  currentSliceGeometry?.dispose();
-  currentSliceGeometry = slicer.createSliceGeometry(sliceData, state.thickness);
-
-  scene.showSlice(currentSliceGeometry);
-}
 
 // Drag-and-drop support
 const canvasContainer = document.getElementById("canvas-container")!;

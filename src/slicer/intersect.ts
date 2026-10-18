@@ -1,24 +1,35 @@
 import * as THREE from "three";
-import type { Segment, Triangle } from "../types.js";
+import type { Segment, SliceAxis, Triangle } from "../types.js";
 
-const EPS = 1e-6;
+// Plane-side classification tolerance.
+const EPS = 1e-5;
+// Vertex-welding tolerance. STL coordinates are float32 (~7 significant
+// digits), so the "same" intersection point computed from two neighboring
+// triangles can differ by ~1e-5 at 100 mm scale. The old 1e-6 was tighter
+// than the data's precision, so duplicates never merged and polygon
+// tracing silently fell apart.
+const WELD = 1e-4;
 
 export function intersectTrianglePlane(
   triangle: Triangle,
-  z: number,
+  position: number,
+  axis: SliceAxis,
 ): Segment | null {
   const { a, b, c } = triangle;
 
-  const zMin = Math.min(a.z, b.z, c.z);
-  const zMax = Math.max(a.z, b.z, c.z);
+  const pa = a[axis];
+  const pb = b[axis];
+  const pc = c[axis];
 
-  if (z < zMin - EPS || z > zMax + EPS) return null;
+  const lo = Math.min(pa, pb, pc);
+  const hi = Math.max(pa, pb, pc);
+  if (position < lo - EPS || position > hi + EPS) return null;
 
-  const da = a.z - z;
-  const db = b.z - z;
-  const dc = c.z - z;
+  const da = pa - position;
+  const db = pb - position;
+  const dc = pc - position;
 
-  // Triangle lies flat in the plane — skip it.
+  // Triangle lies flat in the cut plane — contributes no segment.
   if (Math.abs(da) < EPS && Math.abs(db) < EPS && Math.abs(dc) < EPS) {
     return null;
   }
@@ -27,9 +38,9 @@ export function intersectTrianglePlane(
 
   function add(p: THREE.Vector3): void {
     for (const q of pts) {
-      if (q.distanceTo(p) < EPS) return;
+      if (q.distanceToSquared(p) < WELD * WELD) return;
     }
-    pts.push(p.clone());
+    pts.push(p);
   }
 
   function edge(
@@ -50,9 +61,9 @@ export function intersectTrianglePlane(
     const t = d0 / denom;
     if (t < -EPS || t > 1 + EPS) return;
 
-    add(
-      new THREE.Vector3(p0.x + (p1.x - p0.x) * t, p0.y + (p1.y - p0.y) * t, z),
-    );
+    const p = new THREE.Vector3().lerpVectors(p0, p1, t);
+    p[axis] = position; // snap exactly onto the cut plane
+    add(p);
   }
 
   edge(a, b, da, db);
