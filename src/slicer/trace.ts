@@ -51,6 +51,7 @@ export function tracePolygons(
 
     const index = points.length;
     points.push(q);
+    adj.push([]); // <-- was missing; every point needs its adjacency list
 
     const key = bucketKey(bx, by);
     const cell = buckets.get(key);
