@@ -69,25 +69,10 @@ ui.onExportCurrentSlice(() => {
   );
 });
 
-function updateSlice(): void {
-  if (!slicer) return;
-
-  const state = ui.getState();
-  const sliceData = slicer.slice(state.startHeight, state.thickness);
-
-  currentSliceGeometry?.dispose();
-  currentSliceGeometry = slicer.createSliceGeometry(sliceData, state.thickness);
-
-  scene.showSlice(currentSliceGeometry);
-}
-
 ui.onExportAllSlices(async () => {
   if (!slicer) return;
 
   ui.setBusy(true);
-  // CHANGE 2: wrapped in try/finally so the buttons re-enable even if
-  // sliceAll() throws. Right now, any error in here permanently
-  // disables the whole UI.
   try {
     const state = ui.getState();
     const slices = slicer.sliceAll(state.thickness);
@@ -100,14 +85,22 @@ ui.onExportAllSlices(async () => {
   }
 });
 
+function updateSlice(): void {
+  if (!slicer) return;
+
+  const state = ui.getState();
+  const sliceData = slicer.slice(state.startHeight, state.thickness);
+
+  currentSliceGeometry?.dispose();
+  currentSliceGeometry = slicer.createSliceGeometry(sliceData, state.thickness);
+
+  scene.showSlice(currentSliceGeometry);
+}
+
 // Drag-and-drop support
 const canvasContainer = document.getElementById("canvas-container")!;
 canvasContainer.addEventListener("dragover", (e) => e.preventDefault());
 
-// CHANGE 3: removed the first duplicate drop handler. You had two
-// addEventListener("drop", ...) calls, so every dropped file was
-// processed TWICE (loaded, sliced, and camera-fitted two times).
-// Kept the one that uses the public handleFile() method.
 canvasContainer.addEventListener("drop", (e) => {
   e.preventDefault();
   const file = e.dataTransfer?.files[0];

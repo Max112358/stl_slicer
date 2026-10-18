@@ -1,11 +1,5 @@
 import * as THREE from "three";
-import type {
-  Segment,
-  SliceAxis,
-  SliceData,
-  SliceShape,
-  Triangle,
-} from "../types.js";
+import type { Segment, SliceAxis, SliceData, Triangle } from "../types.js";
 import { intersectTrianglePlane } from "./intersect.js";
 import { tracePolygons } from "./trace.js";
 import {
@@ -34,11 +28,7 @@ function extractTriangles(geometry: THREE.BufferGeometry): Triangle[] {
     }
   } else {
     for (let i = 0; i < position.count; i += 3) {
-      triangles.push({
-        a: v(i),
-        b: v(i + 1),
-        c: v(i + 2),
-      });
+      triangles.push({ a: v(i), b: v(i + 1), c: v(i + 2) });
     }
   }
 
@@ -77,9 +67,7 @@ export class Slicer {
   }
 
   // A slab spans [start, start + thickness], but sample the cross-section
-  // at its MIDDLE — never at the slab boundary. Sampling the exact start
-  // height fails whenever it coincides with min/max or a flat face, which
-  // is why some heights produced no preview no matter the thickness.
+  // at its MIDDLE — never at the slab boundary.
   getCutPosition(start: number, thickness: number): number {
     const min = this.getMin();
     const max = this.getMax();
